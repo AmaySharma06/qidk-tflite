@@ -6,6 +6,7 @@ import android.util.Log
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import ai.onnxruntime.*
 import java.io.File
@@ -15,9 +16,13 @@ import java.nio.FloatBuffer
 class MainActivity : AppCompatActivity() {
 
     private lateinit var statusTv: TextView
-    private lateinit var inputView: ImageView
-    private lateinit var maskView: ImageView
+    private lateinit var drawingView: DrawingView
     private lateinit var outputView: ImageView
+    private lateinit var selectImageBtn: Button
+    private lateinit var clearMaskBtn: Button
+    private lateinit var runBtn: Button
+    private lateinit var clearResultBtn: Button
+    private lateinit var toggleBackendBtn: Button
 
     private var ortEnv: OrtEnvironment? = null
     private var ortSession: OrtSession? = null
@@ -25,21 +30,68 @@ class MainActivity : AppCompatActivity() {
     // Toggle this if colors look wrong: try -1..1 normalization instead of 0..1.
     private val normalizeToMinus1To1 = false // Renamed variable
 
+    private var currentBackend = "htp" // Track current backend
+
+    private val imagePickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            val inputStream = contentResolver.openInputStream(it)
+            val bitmap = BitmapFactory.decodeStream(inputStream)
+            drawingView.setImage(bitmap)
+            outputView.setImageBitmap(null) // Clear previous result
+            status("Image selected. Draw mask (black to remove).")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         statusTv = findViewById(R.id.status)
-        inputView = findViewById(R.id.inputView)
-        maskView = findViewById(R.id.maskView)
+        drawingView = findViewById(R.id.drawingView)
         outputView = findViewById(R.id.outputView)
+        selectImageBtn = findViewById(R.id.selectImageBtn)
+        clearMaskBtn = findViewById(R.id.clearMaskBtn)
+        runBtn = findViewById(R.id.runBtn)
+        clearResultBtn = findViewById(R.id.clearResultBtn)
+        toggleBackendBtn = findViewById(R.id.toggleBackendBtn)
 
-        findViewById<Button>(R.id.runBtn).setOnClickListener {
-            runFromAssets()
+        selectImageBtn.setOnClickListener {
+            imagePickerLauncher.launch("image/*")
         }
+
+        clearMaskBtn.setOnClickListener {
+            drawingView.clearMask()
+            status("Mask cleared.")
+        }
+
+        runBtn.setOnClickListener {
+            val inputBmp = drawingView.bitmap ?: run {
+                status("No image selected.")
+                return@setOnClickListener
+            }
+            val maskBmp = drawingView.getMaskBitmap() ?: run {
+                status("No mask available.")
+                return@setOnClickListener
+            }
+            runInpainting(inputBmp, maskBmp)
+        }
+
+        clearResultBtn.setOnClickListener {
+            outputView.setImageBitmap(null)
+            status("Result cleared.")
+        }
+
+        toggleBackendBtn.setOnClickListener {
+            currentBackend = if (currentBackend == "htp") "cpu" else "htp"
+            toggleBackendBtn.text = "Toggle Backend (${currentBackend.uppercase()})"
+            status("Switched to $currentBackend backend. Restart app or re-run to apply.")
+        }
+
+        // Set initial button text
+        toggleBackendBtn.text = "Toggle Backend (${currentBackend.uppercase()})"
     }
 
-    private fun runFromAssets() {
+    private fun runInpainting(inputBmp: Bitmap, maskBmp: Bitmap) {
         try {
             status("Copying model and assets…")
             val modelDir = File(filesDir, "qaihub/lama").apply { mkdirs() }
@@ -48,12 +100,6 @@ class MainActivity : AppCompatActivity() {
 
             Log.i("LAMA", "Starting time calculation for LAMA");
             val startTime = System.currentTimeMillis()
-            // Load bitmaps from assets
-            val inputBmp = assets.open("qaihub/lama/input.jpg").use { BitmapFactory.decodeStream(it) }
-            val maskBmp = assets.open("qaihub/lama/mask.jpg").use { BitmapFactory.decodeStream(it) }
-
-            inputView.setImageBitmap(inputBmp)
-            maskView.setImageBitmap(maskBmp)
 
             status("Initializing ONNX Runtime…")
             initOrtQnn(onnxFile.absolutePath)
@@ -91,20 +137,24 @@ class MainActivity : AppCompatActivity() {
 
         // Set QNN options in a map (without prefix) and add the QNN EP.
         try {
-            val backendType = "htp" // Change this to "cpu" or "gpu" for testing other backends
-            val qnnOptions = mapOf(
-                "backend_type" to backendType,
-                // Good defaults shown in Qualcomm examples/job pages:
-                "htp_performance_mode" to "burst",
-                "htp_graph_finalization_optimization_mode" to "3",
-                "enable_htp_fp16_precision" to "1"
-            )
-            so.addQnn(qnnOptions)
-            status("QNN EP options set for backend: $backendType.")
-            Log.i("LAMA", "Model set to run on $backendType via QNN EP")
+            val backendType = currentBackend
+            if (backendType == "htp") {
+                val qnnOptions = mapOf(
+                    "backend_type" to backendType,
+                    // Simplified options for better compatibility
+                    "htp_performance_mode" to "sustained_high_performance",
+                    "enable_htp_fp16_precision" to "0"  // Try FP32 first
+                )
+                so.addQnn(qnnOptions)
+            } else {
+                // For CPU, no special options needed
+                Log.i("LAMA", "Using CPU backend")
+            }
+            status("EP options set for backend: $backendType.")
+            Log.i("LAMA", "Model set to run on $backendType")
         } catch (e: Exception) {
-            Log.w("LAMA", "Failed to add QNN EP or set options (may fall back to CPU): ${e.message}")
-            status("Failed to set QNN EP options (using default CPU).")
+            Log.w("LAMA", "Failed to set EP options: ${e.message}")
+            status("Failed to set EP options.")
         }
 
         // Create session
@@ -132,17 +182,15 @@ class MainActivity : AppCompatActivity() {
             nameMask  to maskTensor as OnnxTensor
         )
 
-        return session.use { s: OrtSession ->
-            s.run(inputs).use { result: OrtSession.Result ->
-                // Assume single output; get as FloatBuffer
-                val out = result[0] as OnnxTensor
-                val fb = out.floatBuffer
-                // Duplicate into a direct buffer we own (result will be closed on return)
-                val copy = FloatBuffer.allocate(fb.remaining())
-                copy.put(fb)
-                copy.rewind()
-                copy
-            }
+        return session.run(inputs).use { result: OrtSession.Result ->
+            // Assume single output; get as FloatBuffer
+            val out = result[0] as OnnxTensor
+            val fb = out.floatBuffer
+            // Duplicate into a direct buffer we own (result will be closed on return)
+            val copy = FloatBuffer.allocate(fb.remaining())
+            copy.put(fb)
+            copy.rewind()
+            copy
         }
     }
 
@@ -221,7 +269,7 @@ class MainActivity : AppCompatActivity() {
                 val g = (c shr 8) and 0xFF
                 val b = c and 0xFF
                 val gray = (0.299f * r + 0.587f * g + 0.114f * b)
-                arr[y * w + x] = if (gray >= 128f) 1f else 0f
+                arr[y * w + x] = if (gray < 128f) 1f else 0f
             }
         }
         out.put(arr)
@@ -258,5 +306,11 @@ class MainActivity : AppCompatActivity() {
         }
         outBmp.setPixels(pixels, 0, w, 0, 0, w, h)
         return outBmp
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        ortSession?.close()
+        ortEnv?.close()
     }
 }
