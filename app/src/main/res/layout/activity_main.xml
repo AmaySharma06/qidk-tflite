@@ -37,17 +37,48 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"/>
 
-        <Button
-            android:id="@+id/toggleBackendBtn"
-            android:text="Toggle Backend (HTP/CPU)"
+        <TextView
+            android:layout_marginTop="16dp"
+            android:text="Backend Selection:"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <RadioGroup
+            android:id="@+id/backendRadioGroup"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"/>
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <RadioButton
+                android:id="@+id/radioCpu"
+                android:text="CPU"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:checked="true"/>
+
+            <RadioButton
+                android:id="@+id/radioGpu"
+                android:text="GPU"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"/>
+
+            <RadioButton
+                android:id="@+id/radioNpu"
+                android:text="NPU"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"/>
+        </RadioGroup>
 
         <TextView
             android:id="@+id/status"
-            android:layout_marginTop="8dp"
-            android:text="Status: idle"
+            android:layout_marginTop="16dp"
+            android:text="Status: Ready"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
