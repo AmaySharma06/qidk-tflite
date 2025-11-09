@@ -28,13 +28,17 @@ public class AIHubDefaults {
             // AI Hub sets some GPUv2 settings that are not accessible via the Java API.
             { TFLiteHelpers.DelegateType.QNN_NPU, TFLiteHelpers.DelegateType.GPUv2 },
 
-            // 2. GPUv2 + XNNPack
+            // 2. QNN_NPU only + XNNPack
+            // For devices with NPU support, try NPU-only before GPU
+            { TFLiteHelpers.DelegateType.QNN_NPU },
+
+            // 3. GPUv2 + XNNPack
             // https://app.aihub.qualcomm.com/docs/hub/api.html#profile-inference-options
             // Similar to AI Hub "compute_unit=gpu" on all devices
             // AI Hub sets some GPU settings that are not accessible via the Java API.
             { TFLiteHelpers.DelegateType.GPUv2 },
 
-            // 3. XNNPack (final, CPU-only fallback)
+            // 4. XNNPack (final, CPU-only fallback)
             // https://app.aihub.qualcomm.com/docs/hub/api.html#profile-inference-options
             // Same as AI Hub "compute_unit=cpu" on all devices
             { }

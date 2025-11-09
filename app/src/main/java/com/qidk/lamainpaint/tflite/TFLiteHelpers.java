@@ -110,28 +110,48 @@ public class TFLiteHelpers {
         Set<DelegateType> attemptedDelegates = new HashSet<>();
 
         // Attempt to register delegate pairings in the defined priority order.
-        for (DelegateType[] delegatesToRegister : delegatePriorityOrder) {
-            Log.i(TAG, "Attempting delegate combination: " + Arrays.toString(delegatesToRegister));
+        for (int attemptNum = 0; attemptNum < delegatePriorityOrder.length; attemptNum++) {
+            DelegateType[] delegatesToRegister = delegatePriorityOrder[attemptNum];
+            Log.i(TAG, "═══════════════════════════════════════════════");
+            Log.i(TAG, "ATTEMPT #" + (attemptNum + 1) + ": Trying delegate combination: " + Arrays.toString(delegatesToRegister));
+            Log.i(TAG, "═══════════════════════════════════════════════");
             
             // Create delegates for this attempt if we haven't done so already.
-            Arrays.stream(delegatesToRegister)
-                    .filter(delegateType -> !attemptedDelegates.contains(delegateType))
-                    .forEach(delegateType -> {
-                        Delegate delegate = CreateDelegate(delegateType, nativeLibraryDir, cacheDir, modelIdentifier);
-                        if (delegate != null) {
-                            delegates.put(delegateType, delegate);
-                            Log.i(TAG, "Successfully created delegate: " + delegateType.name());
-                        } else {
-                            Log.w(TAG, "Failed to create delegate: " + delegateType.name());
-                        }
-                        attemptedDelegates.add(delegateType);
-                    });
+            for (DelegateType delegateType : delegatesToRegister) {
+                if (attemptedDelegates.contains(delegateType)) {
+                    Log.i(TAG, "  ↳ Delegate " + delegateType.name() + " already attempted, reusing result");
+                    continue;
+                }
+                
+                Log.i(TAG, "  ↳ Creating delegate: " + delegateType.name());
+                Delegate delegate = CreateDelegate(delegateType, nativeLibraryDir, cacheDir, modelIdentifier);
+                
+                if (delegate != null) {
+                    delegates.put(delegateType, delegate);
+                    Log.i(TAG, "  ✅ Successfully created delegate: " + delegateType.name());
+                } else {
+                    Log.e(TAG, "  ❌ FAILED to create delegate: " + delegateType.name());
+                    Log.e(TAG, "     This delegate will NOT be available for this model!");
+                }
+                attemptedDelegates.add(delegateType);
+            }
 
-            // If one or more delegates in this attempt could not be instantiated,
-            // skip this attempt.
-            if (Arrays.stream(delegatesToRegister).anyMatch(x -> !delegates.containsKey(x))) {
+            // Check if all required delegates were created
+            List<DelegateType> missingDelegates = new ArrayList<>();
+            for (DelegateType required : delegatesToRegister) {
+                if (!delegates.containsKey(required)) {
+                    missingDelegates.add(required);
+                }
+            }
+            
+            if (!missingDelegates.isEmpty()) {
+                Log.w(TAG, "  ⚠️  Skipping this combination - missing delegates: " + missingDelegates);
+                Log.w(TAG, "  ═══════════════════════════════════════════════");
                 continue;
             }
+            
+            Log.i(TAG, "  ✅ All required delegates created successfully!");
+            Log.i(TAG, "  ↳ Attempting to create interpreter with these delegates...");
 
             // Create interpreter.
             Interpreter interpreter = CreateInterpreterFromDelegates(
@@ -144,14 +164,20 @@ public class TFLiteHelpers {
 
             // If the interpreter failed to be created, move on to the next attempt.
             if (interpreter == null) {
+                Log.e(TAG, "  ❌ FAILED to create interpreter with delegates: " + Arrays.toString(delegatesToRegister));
+                Log.e(TAG, "  ═══════════════════════════════════════════════");
                 continue;
             }
+
+            Log.i(TAG, "  🎉 SUCCESS! Interpreter created with delegates: " + Arrays.toString(delegatesToRegister));
+            Log.i(TAG, "  ═══════════════════════════════════════════════");
 
             // Drop & close delegates that were not used by this attempt.
             delegates.keySet().stream()
                     .filter(delegateType -> Arrays.stream(delegatesToRegister).noneMatch(d -> d == delegateType))
                     .collect(Collectors.toSet()) // needed so we don't modify the same object we're looping over
                     .forEach(unusedDelegateType -> {
+                        Log.i(TAG, "Closing unused delegate: " + unusedDelegateType.name());
                         Objects.requireNonNull(delegates.remove(unusedDelegateType)).close();
                     });
 
@@ -159,7 +185,14 @@ public class TFLiteHelpers {
             return new Pair<>(interpreter, delegates);
         }
 
-        throw new RuntimeException("Unable to create an interpreter of any kind for the provided model. See log for details.");
+        Log.e(TAG, "═══════════════════════════════════════════════");
+        Log.e(TAG, "❌❌❌ FATAL ERROR ❌❌❌");
+        Log.e(TAG, "Unable to create interpreter with ANY delegate combination!");
+        Log.e(TAG, "Attempted " + delegatePriorityOrder.length + " combinations");
+        Log.e(TAG, "Delegates that were attempted: " + attemptedDelegates);
+        Log.e(TAG, "Delegates that succeeded: " + delegates.keySet());
+        Log.e(TAG, "═══════════════════════════════════════════════");
+        throw new RuntimeException("Unable to create an interpreter of any kind for the provided model. See detailed logs above.");
     }
 
     /**
@@ -289,7 +322,8 @@ public class TFLiteHelpers {
         QnnDelegate.Options qnnOptions = new QnnDelegate.Options();
         // Point the QNN Delegate to the QNN libraries to use.
         qnnOptions.setSkelLibraryDir(nativeLibraryDir);
-        qnnOptions.setLogLevel(QnnDelegate.Options.LogLevel.LOG_LEVEL_WARN);
+        // Increase log level to INFO to see FP16 initialization details
+        qnnOptions.setLogLevel(QnnDelegate.Options.LogLevel.LOG_LEVEL_INFO);
 
         // The QNN delegate will compile this model for use with the NPU.
         //
@@ -318,29 +352,34 @@ public class TFLiteHelpers {
         //
         // -------------------------------
 
+        // CRITICAL: Try DSP first (like ImageClassification does), then fall back to HTP
+        // The QNN library itself tries DSP->HTP fallback, but we need to set the right backend type
+        
         if (QnnDelegate.checkCapability(QnnDelegate.Capability.DSP_RUNTIME)) {
-            Log.i(TAG, "Device supports DSP runtime");
+            Log.i(TAG, "Using DSP backend (QNN will handle HTP fallback internally if needed)");
             qnnOptions.setBackendType(QnnDelegate.Options.BackendType.DSP_BACKEND);
-            qnnOptions.setDspOptions(QnnDelegate.Options.DspPerformanceMode.DSP_PERFORMANCE_BURST, QnnDelegate.Options.DspPdSession.DSP_PD_SESSION_ADAPTIVE);
+            qnnOptions.setDspOptions(QnnDelegate.Options.DspPerformanceMode.DSP_PERFORMANCE_BURST, 
+                                    QnnDelegate.Options.DspPdSession.DSP_PD_SESSION_ADAPTIVE);
         } else {
-            Log.i(TAG, "Device does not support DSP runtime, checking HTP...");
             boolean hasHTP_FP16 = QnnDelegate.checkCapability(QnnDelegate.Capability.HTP_RUNTIME_FP16);
             boolean hasHTP_QUANT = QnnDelegate.checkCapability(QnnDelegate.Capability.HTP_RUNTIME_QUANTIZED);
             
-            Log.i(TAG, "HTP_FP16 support: " + hasHTP_FP16);
-            Log.i(TAG, "HTP_QUANT support: " + hasHTP_QUANT);
-
+            Log.i(TAG, "NPU Capabilities:");
+            Log.i(TAG, "  HTP_FP16 support: " + hasHTP_FP16);
+            Log.i(TAG, "  HTP_QUANT support: " + hasHTP_QUANT);
+            
             if (!hasHTP_FP16 && !hasHTP_QUANT) {
                 Log.e(TAG, "QNN with NPU backend is not supported on this device.");
                 return null;
             }
 
+            Log.i(TAG, "Using HTP backend for Snapdragon 8 Gen 3");
             qnnOptions.setBackendType(QnnDelegate.Options.BackendType.HTP_BACKEND);
             qnnOptions.setHtpUseConvHmx(QnnDelegate.Options.HtpUseConvHmx.HTP_CONV_HMX_ON);
             qnnOptions.setHtpPerformanceMode(QnnDelegate.Options.HtpPerformanceMode.HTP_PERFORMANCE_BURST);
-
+            
             if (hasHTP_FP16) {
-                Log.i(TAG, "Setting HTP precision to FP16");
+                Log.i(TAG, "✅ Enabling HTP FP16 precision for FP32 model");
                 qnnOptions.setHtpPrecision(QnnDelegate.Options.HtpPrecision.HTP_PRECISION_FP16);
             }
         }

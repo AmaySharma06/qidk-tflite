@@ -69,10 +69,16 @@ public class LamaInpainting {
         TFLiteHelpers.DelegateType[][] delegatePriorityOrder;
         if (enabledDelegates.isEmpty()) {
             // CPU-only mode: empty delegate array, will use XNNPack
+            Log.i(TAG, "CPU-only mode requested");
             delegatePriorityOrder = new TFLiteHelpers.DelegateType[][] { {} };
         } else {
             // Use AI Hub defaults filtered by enabled delegates
+            Log.i(TAG, "Enabled delegates: " + enabledDelegates.toString());
             delegatePriorityOrder = AIHubDefaults.delegatePriorityOrderForDelegates(enabledDelegates);
+            Log.i(TAG, "Delegate priority order combinations: " + delegatePriorityOrder.length);
+            for (int i = 0; i < delegatePriorityOrder.length; i++) {
+                Log.i(TAG, "  Combination " + i + ": " + java.util.Arrays.toString(delegatePriorityOrder[i]));
+            }
         }
 
         // Create interpreter with delegates
