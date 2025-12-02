@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.qidk.lamainpaint.domain.model.Backend
 import com.qidk.lamainpaint.domain.model.FitMode
+import com.qidk.lamainpaint.domain.model.ModelType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -20,6 +21,7 @@ class AppPreferences(private val context: Context) {
     
     companion object {
         private val BACKEND_KEY = stringPreferencesKey("backend")
+        private val MODEL_TYPE_KEY = stringPreferencesKey("model_type")
         private val BRUSH_SIZE_KEY = floatPreferencesKey("brush_size")
         private val FEATHER_KEY = floatPreferencesKey("feather")
         private val FIT_MODE_KEY = stringPreferencesKey("fit_mode")
@@ -29,6 +31,27 @@ class AppPreferences(private val context: Context) {
         
         private const val DEFAULT_BRUSH_SIZE = 20f
         private const val DEFAULT_FEATHER = 0f
+    }
+    
+    /**
+     * Get model type preference flow.
+     */
+    val modelType: Flow<ModelType> = dataStore.data.map { prefs ->
+        val modelTypeStr = prefs[MODEL_TYPE_KEY] ?: ModelType.MIGAN.name
+        try {
+            ModelType.valueOf(modelTypeStr)
+        } catch (e: IllegalArgumentException) {
+            ModelType.MIGAN
+        }
+    }
+    
+    /**
+     * Set model type preference.
+     */
+    suspend fun setModelType(modelType: ModelType) {
+        dataStore.edit { prefs ->
+            prefs[MODEL_TYPE_KEY] = modelType.name
+        }
     }
     
     /**
