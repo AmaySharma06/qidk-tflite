@@ -322,8 +322,8 @@ public class TFLiteHelpers {
         QnnDelegate.Options qnnOptions = new QnnDelegate.Options();
         // Point the QNN Delegate to the QNN libraries to use.
         qnnOptions.setSkelLibraryDir(nativeLibraryDir);
-        // Increase log level to INFO to see FP16 initialization details
-        qnnOptions.setLogLevel(QnnDelegate.Options.LogLevel.LOG_LEVEL_INFO);
+        // Log level: ERROR only for minimal overhead
+        qnnOptions.setLogLevel(QnnDelegate.Options.LogLevel.LOG_LEVEL_ERROR);
 
         // The QNN delegate will compile this model for use with the NPU.
         //
@@ -352,46 +352,58 @@ public class TFLiteHelpers {
         //
         // -------------------------------
 
-        // CRITICAL: Try DSP first (like ImageClassification does), then fall back to HTP
-        // The QNN library itself tries DSP->HTP fallback, but we need to set the right backend type
+        // Check capabilities
+        boolean hasDSP = QnnDelegate.checkCapability(QnnDelegate.Capability.DSP_RUNTIME);
+        boolean hasHTP_FP16 = QnnDelegate.checkCapability(QnnDelegate.Capability.HTP_RUNTIME_FP16);
+        boolean hasHTP_QUANT = QnnDelegate.checkCapability(QnnDelegate.Capability.HTP_RUNTIME_QUANTIZED);
         
-        if (QnnDelegate.checkCapability(QnnDelegate.Capability.DSP_RUNTIME)) {
-            Log.i(TAG, "Using DSP backend (QNN will handle HTP fallback internally if needed)");
+        Log.i(TAG, "NPU Capabilities:");
+        Log.i(TAG, "  DSP_RUNTIME: " + hasDSP);
+        Log.i(TAG, "  HTP_FP16: " + hasHTP_FP16);
+        Log.i(TAG, "  HTP_QUANT: " + hasHTP_QUANT);
+        
+        // ORIGINAL LAMA CONFIG: DSP first (this gave 50ms performance!)
+        // The original AI Hub sample code prioritized DSP over HTP
+        
+        if (hasDSP) {
+            Log.i(TAG, "✅ Using DSP backend (original LAMA config that gave 50ms)");
             qnnOptions.setBackendType(QnnDelegate.Options.BackendType.DSP_BACKEND);
             qnnOptions.setDspOptions(QnnDelegate.Options.DspPerformanceMode.DSP_PERFORMANCE_BURST, 
                                     QnnDelegate.Options.DspPdSession.DSP_PD_SESSION_ADAPTIVE);
-        } else {
-            boolean hasHTP_FP16 = QnnDelegate.checkCapability(QnnDelegate.Capability.HTP_RUNTIME_FP16);
-            boolean hasHTP_QUANT = QnnDelegate.checkCapability(QnnDelegate.Capability.HTP_RUNTIME_QUANTIZED);
+            Log.i(TAG, "  ✓ Set DSP with BURST mode and ADAPTIVE PD");
             
-            Log.i(TAG, "NPU Capabilities:");
-            Log.i(TAG, "  HTP_FP16 support: " + hasHTP_FP16);
-            Log.i(TAG, "  HTP_QUANT support: " + hasHTP_QUANT);
-            
-            if (!hasHTP_FP16 && !hasHTP_QUANT) {
-                Log.e(TAG, "QNN with NPU backend is not supported on this device.");
-                return null;
-            }
-
-            Log.i(TAG, "Using HTP backend for Snapdragon 8 Gen 3");
+        } else if (hasHTP_FP16) {
+            Log.i(TAG, "⚠️ Using HTP backend with FP16 (DSP not available)");
             qnnOptions.setBackendType(QnnDelegate.Options.BackendType.HTP_BACKEND);
-            qnnOptions.setHtpUseConvHmx(QnnDelegate.Options.HtpUseConvHmx.HTP_CONV_HMX_ON);
             qnnOptions.setHtpPerformanceMode(QnnDelegate.Options.HtpPerformanceMode.HTP_PERFORMANCE_BURST);
+            qnnOptions.setHtpPrecision(QnnDelegate.Options.HtpPrecision.HTP_PRECISION_FP16);
+            qnnOptions.setHtpUseConvHmx(QnnDelegate.Options.HtpUseConvHmx.HTP_CONV_HMX_ON);
+            Log.i(TAG, "  ✓ Set HTP with BURST, FP16, ConvHmx ON");
             
-            if (hasHTP_FP16) {
-                Log.i(TAG, "✅ Enabling HTP FP16 precision for FP32 model");
-                qnnOptions.setHtpPrecision(QnnDelegate.Options.HtpPrecision.HTP_PRECISION_FP16);
-            }
+        } else if (hasHTP_QUANT) {
+            Log.i(TAG, "⚠️ Using HTP backend with quantized precision");
+            qnnOptions.setBackendType(QnnDelegate.Options.BackendType.HTP_BACKEND);
+            qnnOptions.setHtpPerformanceMode(QnnDelegate.Options.HtpPerformanceMode.HTP_PERFORMANCE_BURST);
+            qnnOptions.setHtpUseConvHmx(QnnDelegate.Options.HtpUseConvHmx.HTP_CONV_HMX_ON);
+            Log.i(TAG, "  ✓ Set HTP with BURST mode, ConvHmx ON");
+        } else {
+            Log.e(TAG, "❌ QNN with NPU backend is not supported on this device.");
+            Log.e(TAG, "   No DSP, HTP_FP16, or HTP_QUANT capability detected!");
+            return null;
         }
 
         try {
-            Log.i(TAG, "Creating QNN delegate instance...");
+            Log.i(TAG, ">>> Creating QNN delegate instance...");
+            long startTime = System.currentTimeMillis();
             QnnDelegate delegate = new QnnDelegate(qnnOptions);
-            Log.i(TAG, "QNN delegate created successfully");
+            long createTime = System.currentTimeMillis() - startTime;
+            Log.i(TAG, ">>> QNN delegate created successfully in " + createTime + "ms");
             return delegate;
         } catch (Exception e) {
-            Log.e(TAG, "QNN with NPU backend failed to initialize: " + e.getMessage());
-            Log.e(TAG, "QNN delegate error stack trace:", e);
+            Log.e(TAG, "❌❌❌ QNN with NPU backend failed to initialize!");
+            Log.e(TAG, "Error message: " + e.getMessage());
+            Log.e(TAG, "Error class: " + e.getClass().getName());
+            Log.e(TAG, "Full stack trace:", e);
             return null;
         }
     }

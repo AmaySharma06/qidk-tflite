@@ -17,7 +17,7 @@ public class AIHubDefaults {
 
     // Number of threads AI Hub uses by default for layers running on CPU.
     // https://app.aihub.qualcomm.com/docs/hub/api.html#profile-inference-options
-    public static final int numCPUThreads = Runtime.getRuntime().availableProcessors() / 2;
+    public static final int numCPUThreads = 4;
 
     // The default delegate registry order for AI Hub.
     // For more details, see the JavaDoc for TFLiteHelpers::CreateInterpreterAndDelegatesFromOptions.
