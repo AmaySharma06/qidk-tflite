@@ -109,7 +109,7 @@ fun EditorScreen(
                         
                         AssistChip(
                             onClick = { },
-                            label = { Text(state.backend.name) }
+                            label = { Text("${state.modelType.displayName} • ${state.backend.name}") }
                         )
                     }
                 }

@@ -53,14 +53,21 @@ class EditorViewModel(
             combine(
                 appPreferences.backend,
                 appPreferences.brushSize,
-                appPreferences.feather
-            ) { backend, brushSize, feather ->
-                Triple(backend, brushSize, feather)
-            }.collect { (backend, brushSize, feather) ->
+                appPreferences.feather,
+                appPreferences.modelType
+            ) { backend, brushSize, feather, modelType ->
+                object {
+                    val backend = backend
+                    val brushSize = brushSize
+                    val feather = feather
+                    val modelType = modelType
+                }
+            }.collect { prefs ->
                 _state.update { it.copy(
-                    backend = backend,
-                    brushSize = brushSize,
-                    feather = feather
+                    backend = prefs.backend,
+                    brushSize = prefs.brushSize,
+                    feather = prefs.feather,
+                    modelType = prefs.modelType
                 )}
             }
         }
@@ -298,12 +305,12 @@ class EditorViewModel(
                     }
                 }
                 
-                _state.update { it.copy(processingStatus = "Processing with ${currentState.backend}...") }
+                _state.update { it.copy(processingStatus = "Processing with ${currentState.modelType.displayName} on ${currentState.backend}...") }
                 
                 // Run inpainting
                 val runId = fileStore.generateRunId()
                 val result = withContext(Dispatchers.IO) {
-                    runInpainting.execute(input512, mask512, currentState.backend, runId)
+                    runInpainting.execute(input512, mask512, currentState.modelType, currentState.backend, runId)
                 }
                 
                 val result512 = result.first

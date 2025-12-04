@@ -16,6 +16,7 @@ import com.qidk.lamainpaint.data.AppPreferences
 import com.qidk.lamainpaint.data.FileStore
 import com.qidk.lamainpaint.data.ProjectRepository
 import com.qidk.lamainpaint.domain.model.FitMode
+import com.qidk.lamainpaint.domain.model.ModelType
 import com.qidk.lamainpaint.domain.usecase.GenerateInput512
 import com.qidk.lamainpaint.domain.usecase.RasterizeMask512
 import com.qidk.lamainpaint.domain.usecase.RunInpainting
@@ -90,8 +91,12 @@ fun LamaInpaintApp(
 ) {
     val navController = rememberNavController()
     val editorState by editorViewModel.state.collectAsState()
+    val scope = rememberCoroutineScope()
     
     var selectedImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    
+    // Model selection state
+    val selectedModel by appPreferences.modelType.collectAsState(initial = ModelType.MIGAN)
     
     NavHost(navController = navController, startDestination = "home") {
         composable("home") {
@@ -102,6 +107,12 @@ fun LamaInpaintApp(
                 },
                 onNavigateToSettings = {
                     navController.navigate("settings")
+                },
+                selectedModel = selectedModel,
+                onModelSelected = { model ->
+                    scope.launch {
+                        appPreferences.setModelType(model)
+                    }
                 }
             )
         }

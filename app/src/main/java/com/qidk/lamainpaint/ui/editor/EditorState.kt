@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.PointF
 import com.qidk.lamainpaint.domain.model.Backend
 import com.qidk.lamainpaint.domain.model.ImageTransform
+import com.qidk.lamainpaint.domain.model.ModelType
 import com.qidk.lamainpaint.domain.model.Project
 import com.qidk.lamainpaint.domain.model.RunResult
 
@@ -31,6 +32,7 @@ data class EditorState(
     val canRedo: Boolean = false,
     val canRun: Boolean = false,
     val backend: Backend = Backend.CPU,
+    val modelType: ModelType = ModelType.MIGAN,
     val error: String? = null,
     val clearMaskTrigger: Long = 0L,  // Timestamp to trigger clear in UI
     val undoStack: List<Bitmap> = emptyList(),  // Stack of mask bitmap snapshots for undo
