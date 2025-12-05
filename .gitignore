@@ -17,3 +17,4 @@ local.properties
 /app/src/main/assets/qaihub/lama/*.onnx
 /app/src/main/assets/qaihub/lama/*.jpg
 /app/src/main/assets/qaihub/lama/*.png
+*.md
